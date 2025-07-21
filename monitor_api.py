@@ -1,23 +1,18 @@
 from flask import Flask, jsonify
+from monitor_logic import run_gaze_monitoring
 import threading
-import monitor_logic  # Your gaze detection logic
 
 app = Flask(__name__)
-recording_thread = None
 
 @app.route('/')
-def home():
-    return jsonify({'message': 'Avian Gaze API is running!'})
+def index():
+    return "Avian Gaze Monitoring API is running"
 
-@app.route('/start_monitoring', methods=['GET'])
+@app.route('/start-monitoring', methods=['GET'])
 def start_monitoring():
-    global recording_thread
-    if recording_thread and recording_thread.is_alive():
-        return jsonify({'status': 'already running'})
-
-    recording_thread = threading.Thread(target=monitor_logic.start_recording)
-    recording_thread.start()
-    return jsonify({'status': 'monitoring started'})
+    thread = threading.Thread(target=run_gaze_monitoring)
+    thread.start()
+    return jsonify({"message": "Monitoring started in background"}), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True)
