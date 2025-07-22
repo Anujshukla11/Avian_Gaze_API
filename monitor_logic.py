@@ -14,10 +14,32 @@ FACE_AREA_THRESHOLD = 5000
 def get_head_tilt(landmarks):
     left_point = (landmarks.part(36).x, landmarks.part(36).y)
     right_point = (landmarks.part(45).x, landmarks.part(45).y)
+
     delta_y = right_point[1] - left_point[1]
     delta_x = right_point[0] - left_point[0]
+
     angle = np.degrees(np.arctan2(delta_y, delta_x))
     return angle
+
+def get_gaze_ratio(eye_points, gray):
+    min_x = np.min(eye_points[:, 0])
+    max_x = np.max(eye_points[:, 0])
+    min_y = np.min(eye_points[:, 1])
+    max_y = np.max(eye_points[:, 1])
+
+    eye = gray[min_y:max_y, min_x:max_x]
+    _, thresh = cv2.threshold(eye, 70, 255, cv2.THRESH_BINARY)
+
+    h, w = thresh.shape
+    left_side = thresh[:, :w//2]
+    right_side = thresh[:, w//2:]
+
+    left_white = cv2.countNonZero(left_side)
+    right_white = cv2.countNonZero(right_side)
+
+    if right_white == 0:
+        return 1  # avoid division by zero
+    return left_white / right_white
 
 def run_gaze_monitoring():
     video = cv2.VideoCapture(0)
@@ -45,29 +67,11 @@ def run_gaze_monitoring():
                 else:
                     status = "Not Staring"
             else:
-                left_eye = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(36, 42)])
-                right_eye = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(42, 48)])
+                left_eye_points = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(36, 42)])
+                right_eye_points = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(42, 48)])
 
-                def get_gaze_ratio(eye_points):
-                    min_x = np.min(eye_points[:, 0])
-                    max_x = np.max(eye_points[:, 0])
-                    min_y = np.min(eye_points[:, 1])
-                    max_y = np.max(eye_points[:, 1])
-
-                    eye = gray[min_y:max_y, min_x:max_x]
-                    _, thresh = cv2.threshold(eye, 70, 255, cv2.THRESH_BINARY)
-                    h, w = thresh.shape
-                    left = thresh[:, :w // 2]
-                    right = thresh[:, w // 2:]
-
-                    if cv2.countNonZero(right) == 0:
-                        return 5
-                    if cv2.countNonZero(left) == 0:
-                        return 1
-                    return cv2.countNonZero(left) / cv2.countNonZero(right)
-
-                left_ratio = get_gaze_ratio(left_eye)
-                right_ratio = get_gaze_ratio(right_eye)
+                left_ratio = get_gaze_ratio(left_eye_points, gray)
+                right_ratio = get_gaze_ratio(right_eye_points, gray)
                 avg_ratio = (left_ratio + right_ratio) / 2
 
                 if 0.9 < avg_ratio < 1.2:
