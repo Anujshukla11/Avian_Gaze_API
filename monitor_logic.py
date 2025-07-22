@@ -1,115 +1,71 @@
 import cv2
-import dlib
-import numpy as np
+import datetime
 import time
-from datetime import datetime
-import os
 
-detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
+# Load Haar cascade for face detection
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-GAZE_TRIGGER_SECONDS = 3
-FACE_AREA_THRESHOLD = 5000
+# Open video capture
+video = cv2.VideoCapture(0)
+if not video.isOpened():
+    print("Cannot open the camera")
+    exit()
 
-def get_head_tilt(landmarks):
-    left_point = (landmarks.part(36).x, landmarks.part(36).y)
-    right_point = (landmarks.part(45).x, landmarks.part(45).y)
+video_width = int(video.get(3))
+video_height = int(video.get(4))
 
-    delta_y = right_point[1] - left_point[1]
-    delta_x = right_point[0] - left_point[0]
+fourcc = cv2.VideoWriter_fourcc(*'XVID')
+out = None  # We'll create this later only if recording starts
 
-    angle = np.degrees(np.arctan2(delta_y, delta_x))
-    return angle
+face_detected_start = None
+recording = False
 
-def get_gaze_ratio(eye_points, gray):
-    min_x = np.min(eye_points[:, 0])
-    max_x = np.max(eye_points[:, 0])
-    min_y = np.min(eye_points[:, 1])
-    max_y = np.max(eye_points[:, 1])
+print("Monitoring... Press 'q' to quit")
 
-    eye = gray[min_y:max_y, min_x:max_x]
-    _, thresh = cv2.threshold(eye, 70, 255, cv2.THRESH_BINARY)
+while True:
+    ret, frame = video.read()
+    if not ret:
+        print("Cannot grab the frame")
+        break
 
-    h, w = thresh.shape
-    left_side = thresh[:, :w//2]
-    right_side = thresh[:, w//2:]
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(
+        gray, scaleFactor=1.1, minNeighbors=7, minSize=(80, 80), flags=cv2.CASCADE_SCALE_IMAGE
+    )
 
-    left_white = cv2.countNonZero(left_side)
-    right_white = cv2.countNonZero(right_side)
+    current_time = time.time()
 
-    if right_white == 0:
-        return 1  # avoid division by zero
-    return left_white / right_white
+    if len(faces) > 0:
+        if face_detected_start is None:
+            face_detected_start = current_time
+        elif current_time - face_detected_start >= 5 and not recording:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            out = cv2.VideoWriter(f"recording_{timestamp}.avi", fourcc, 20.0, (video_width, video_height))
+            recording = True
+            print("🎥 Started recording...")
 
-def run_gaze_monitoring():
-    video = cv2.VideoCapture(0)
-    gaze_start_time = None
-    recording = False
-    out = None
+        for (x, y, w, h) in faces:
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
 
-    while True:
-        ret, frame = video.read()
-        if not ret:
-            print("Unable to grab the frame")
-            break
+        if recording:
+            out.write(frame)
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = detector(gray)
+    else:
+        face_detected_start = None
+        if recording:
+            print("🛑 Face lost. Stopping recording.")
+            recording = False
+            out.release()
+            out = None
 
-        for face in faces:
-            landmarks = predictor(gray, face)
-            face_area = face.width() * face.height()
+    cv2.imshow("Face Detection (Press 'q' to quit)", frame)
 
-            if face_area < FACE_AREA_THRESHOLD:
-                tilt = get_head_tilt(landmarks)
-                if abs(tilt) < 10:
-                    status = "Staring (fallback)"
-                else:
-                    status = "Not Staring"
-            else:
-                left_eye_points = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(36, 42)])
-                right_eye_points = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(42, 48)])
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        print("Program exited.")
+        break
 
-                left_ratio = get_gaze_ratio(left_eye_points, gray)
-                right_ratio = get_gaze_ratio(right_eye_points, gray)
-                avg_ratio = (left_ratio + right_ratio) / 2
-
-                if 0.9 < avg_ratio < 1.2:
-                    status = "Looking Forward"
-                else:
-                    status = "Not Looking Forward"
-
-            if "Forward" in status or "Staring" in status:
-                if gaze_start_time is None:
-                    gaze_start_time = time.time()
-                elif time.time() - gaze_start_time >= GAZE_TRIGGER_SECONDS:
-                    if not recording:
-                        recording = True
-                        fourcc = cv2.VideoWriter_fourcc(*'XVID')
-                        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                        if not os.path.exists('recordings'):
-                            os.makedirs('recordings')
-                        filename = os.path.join('recordings', f'recording_{timestamp}.avi')
-                        out = cv2.VideoWriter(filename, fourcc, 20.0, (640, 480))
-                    cv2.putText(frame, "Recording Suspicious!", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
-            else:
-                gaze_start_time = None
-                if recording:
-                    recording = False
-                    if out:
-                        out.release()
-                        out = None
-
-            if recording and out:
-                out.write(frame)
-
-            cv2.putText(frame, f"Status: {status}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
-
-        cv2.imshow("Safety Monitor", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    if out:
-        out.release()
-    video.release()
-    cv2.destroyAllWindows()
+# Cleanup
+if out is not None:
+    out.release()
+video.release()
+cv2.destroyAllWindows()

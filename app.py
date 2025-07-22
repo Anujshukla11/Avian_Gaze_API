@@ -1,24 +1,19 @@
 from flask import Flask, jsonify
-import threading
-from monitor_logic import run_gaze_monitoring  # Make sure your logic file is named monitor_logic.py
+import subprocess
 
 app = Flask(__name__)
 
-monitoring_thread = None
+@app.route('/start-monitoring', methods=['POST'])
+def start_monitoring():
+    try:
+        subprocess.Popen(["python3", "start_script.py"])
+        return jsonify({'message': 'Monitoring started successfully!'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 def home():
-    return "Avian Gaze Monitoring API is running."
-
-@app.route('/start-monitoring', methods=['GET'])
-def start_monitoring():
-    global monitoring_thread
-    if monitoring_thread and monitoring_thread.is_alive():
-        return jsonify({"message": "Monitoring is already running."}), 200
-    
-    monitoring_thread = threading.Thread(target=run_gaze_monitoring, daemon=True)
-    monitoring_thread.start()
-    return jsonify({"message": "Monitoring started."}), 200
+    return "Avian Gaze Monitoring API is running"
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=10000)
